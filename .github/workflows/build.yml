@@ -1,0 +1,82 @@
+name: Build installer
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Read version
+        id: ver
+        shell: pwsh
+        run: |
+          $v = (python -c "from version import __version__; print(__version__)").Trim()
+          "version=$v" >> $env:GITHUB_OUTPUT
+          if ("${{ github.ref_type }}" -eq "tag" -and "${{ github.ref_name }}" -ne "v$v") {
+            throw "Tag ${{ github.ref_name }} does not match version.py ($v)"
+          }
+
+      - name: Unit tests
+        run: python tests/test_pages.py
+
+      - name: Build app (PyInstaller)
+        run: >
+          pyinstaller --noconfirm --clean --windowed
+          --name MikesCanonScanner
+          --icon assets/icon.ico
+          --add-data "assets;assets"
+          --hidden-import wia_backend
+          --hidden-import win32com.client
+          --hidden-import pythoncom
+          mikes_canon_scanner.py
+
+      - name: Self-test the built app
+        shell: pwsh
+        run: |
+          $f = Join-Path $env:TEMP "mcs_selftest.txt"
+          Remove-Item $f -ErrorAction SilentlyContinue
+          $p = Start-Process dist\MikesCanonScanner\MikesCanonScanner.exe -ArgumentList "--selftest" -PassThru
+          $p | Wait-Process -Timeout 90
+          if (-not (Test-Path $f)) { throw "Self-test did not finish" }
+          $r = Get-Content $f -Raw
+          Write-Host $r
+          if ($r -notmatch "window=ok" -or $r -notmatch "wia=ok" -or $r -notmatch "icon=ok") { throw "Self-test failed" }
+
+      - name: Build installer (Inno Setup)
+        shell: pwsh
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          & $iscc "/DMyAppVersion=${{ steps.ver.outputs.version }}" installer\setup.iss
+          if ($LASTEXITCODE -ne 0) { throw "Inno Setup failed" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: installer
+          path: installer/Output/*.exe
+
+      - name: Publish GitHub release
+        if: github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $exe = (Get-Item installer\Output\*.exe).FullName
+          gh release create "${{ github.ref_name }}" "$exe" --title "Mike's Canon Scanner ${{ steps.ver.outputs.version }}" --notes-file RELEASE_NOTES.md
