@@ -12,19 +12,16 @@ Repo: https://github.com/mike131419/mikes-canon-scanner (public)
 | `updater.py` | Checks GitHub `releases/latest`, downloads `*Setup.exe`, runs it with `/SILENT` |
 | `version.py` | `__version__` – the single source of the version number |
 | `installer/setup.iss` | Inno Setup script (per-user install, Start menu + desktop shortcut, auto-relaunch after silent update) |
-| `.github/workflows/build.yml` | On tag `vX.Y.Z`: tests → PyInstaller → `--selftest` of the .exe → Inno Setup → GitHub Release |
+| `.github/workflows/build.yml` | On push to main that changes `version.py`: tests → PyInstaller → `--selftest` of the .exe → Inno Setup → GitHub Release |
 | `RELEASE_NOTES.md` | Text of the next release; shown to the user in the in-app update dialog |
 
 ## Releasing a new version
 1. Make the code change; run `python tests/test_pages.py`.
 2. Bump `__version__` in `version.py` (e.g. 1.0.0 → 1.1.0).
 3. Replace `RELEASE_NOTES.md` with a short "what's new" list.
-4. Commit, then tag and push:
-   ```
-   git tag v1.1.0
-   git push origin main v1.1.0
-   ```
-   The tag must equal `v` + `version.py`, or the build stops.
+4. Commit and push to `main`. Any push that changes `version.py` triggers the build;
+   the workflow itself creates the tag `vX.Y.Z` and the GitHub Release
+   (tag pushes are blocked from Claude's sessions, so never push tags manually).
 5. Watch the "Build installer" Action. When it finishes, the release has `MikesCanonScanner-1.1.0-Setup.exe`.
 6. Installed copies show an orange **Update to 1.1.0** button (checked 3 s after start) or via Help > Check for updates.
 
